@@ -10,6 +10,8 @@ from rich.console import Console
 from rich.table import Table
 
 from apk_sentinel import __version__
+from apk_sentinel.analyzers import default_analyzers
+from apk_sentinel.analyzers.secrets import RuleError
 from apk_sentinel.loader import ApkLoadError
 from apk_sentinel.models import ScanResult, Severity
 from apk_sentinel.scanner import scan_apk
@@ -106,12 +108,22 @@ def scan(
             help="Also analyze bundled library code (slower, noisier).",
         ),
     ] = False,
+    secrets_rules: Annotated[
+        Path | None,
+        typer.Option(
+            "--secrets-rules",
+            exists=True,
+            dir_okay=False,
+            help="Custom secrets rule file (same format as rules/secrets.yaml).",
+        ),
+    ] = None,
 ) -> None:
     """Analyze APK and print findings (reports are written to OUT)."""
     threshold = _parse_severity(fail_on) if fail_on else None
     try:
-        result = scan_apk(apk, include_libraries=include_libraries)
-    except ApkLoadError as exc:
+        analyzers = default_analyzers(secrets_rules)
+        result = scan_apk(apk, analyzers, include_libraries=include_libraries)
+    except (ApkLoadError, RuleError) as exc:
         err_console.print(f"[red]error:[/red] {exc}")
         raise typer.Exit(EXIT_USAGE) from exc
 
