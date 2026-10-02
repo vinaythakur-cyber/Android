@@ -84,6 +84,26 @@ def _parse_const_string(output: str) -> str:
     return literal
 
 
+def _trivial_return(names: list[str], outputs: list[str]) -> str | None:
+    """Classify bodies that do nothing but return (see ``MethodInfo.trivial_return``)."""
+    if names == ["return-void"]:
+        return "void"
+    if (
+        len(names) == 2
+        and names[0].startswith("const")
+        and names[1] in {"return", "return-object", "return-wide"}
+    ):
+        _, _, literal = outputs[0].partition(", ")
+        try:
+            value = int(literal, 0)
+        except ValueError:
+            return "const"
+        if value == 0:
+            return "null" if names[1] == "return-object" else "false"
+        return "true" if value == 1 and names[1] == "return" else "const"
+    return None
+
+
 def _method_info(method: Any) -> MethodInfo | None:
     code = method.get_code()
     if code is None:  # abstract or native
@@ -100,13 +120,18 @@ def _method_info(method: Any) -> MethodInfo | None:
             const_strings.append(_parse_const_string(output))
         elif "->" in output:
             references.append(output.rsplit(", ", 1)[-1])
+    small = len(instructions) <= SMALL_METHOD_LIMIT
     return MethodInfo(
         name=method.get_name(),
         descriptor=method.get_descriptor(),
         insn_count=len(instructions),
-        ops=tuple(ops) if len(instructions) <= SMALL_METHOD_LIMIT else (),
+        ops=tuple(ops) if small else (),
         const_strings=tuple(const_strings),
         references=tuple(references),
+        trivial_return=(
+            _trivial_return(ops, [i.get_output() for i in instructions]) if len(ops) <= 2 else None
+        ),
+        has_array_data="fill-array-data" in ops,
     )
 
 

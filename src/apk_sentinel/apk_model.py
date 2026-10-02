@@ -102,6 +102,12 @@ class MethodInfo:
     const_strings: tuple[str, ...] = ()
     # Method / field references, e.g. ``Ljavax/crypto/Cipher;->getInstance(...)``.
     references: tuple[str, ...] = ()
+    # For trivially short bodies: "void" (just ``return-void``), "true" / "false" (returns the
+    # constant 1 / 0), "null" (returns constant 0 as an object), "const" (another constant).
+    # ``None`` for anything that does real work.
+    trivial_return: str | None = None
+    # True if the method embeds a literal byte array (``fill-array-data``), e.g. ``{1,2,3,4}``.
+    has_array_data: bool = False
 
 
 SMALL_METHOD_LIMIT = 8

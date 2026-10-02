@@ -62,6 +62,8 @@ def method(
     const_strings: tuple[str, ...] = (),
     references: tuple[str, ...] = (),
     insn_count: int | None = None,
+    trivial_return: str | None = None,
+    has_array_data: bool = False,
 ) -> MethodInfo:
     return MethodInfo(
         name=name,
@@ -70,6 +72,8 @@ def method(
         ops=ops,
         const_strings=const_strings,
         references=references,
+        trivial_return=trivial_return,
+        has_array_data=has_array_data,
     )
 
 
