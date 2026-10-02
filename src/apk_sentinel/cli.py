@@ -6,8 +6,13 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.console import Console
+from rich.table import Table
 
 from apk_sentinel import __version__
+from apk_sentinel.loader import ApkLoadError
+from apk_sentinel.models import ScanResult, Severity
+from apk_sentinel.scanner import scan_apk
 
 app = typer.Typer(
     name="apk-sentinel",
@@ -16,12 +21,53 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+console = Console()
+err_console = Console(stderr=True)
+
+EXIT_USAGE = 2
+
+_SEVERITY_STYLE = {
+    Severity.CRITICAL: "bold white on red",
+    Severity.HIGH: "bold red",
+    Severity.MEDIUM: "yellow",
+    Severity.LOW: "cyan",
+    Severity.INFO: "dim",
+}
 
 
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"apk-sentinel {__version__}")
         raise typer.Exit()
+
+
+def _parse_severity(value: str) -> Severity:
+    try:
+        return Severity.parse(value)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+def _print_summary(result: ScanResult) -> None:
+    target = result.target
+    console.print(
+        f"[bold]{target.package}[/bold] {target.version_name or ''} "
+        f"(minSdk {target.min_sdk}, targetSdk {target.target_sdk})  sha256:{target.sha256[:12]}…"
+    )
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Severity")
+    table.add_column("Rule")
+    table.add_column("Finding")
+    for finding in result.sorted_findings():
+        style = _SEVERITY_STYLE[finding.severity]
+        table.add_row(
+            f"[{style}]{finding.severity.value.upper()}[/]", finding.rule_id, finding.title
+        )
+    console.print(table)
+    counts = ", ".join(f"{n} {sev}" for sev, n in result.counts_by_severity().items() if n)
+    console.print(f"{len(result.findings)} finding(s): {counts or 'none'}")
+    for error in result.errors:
+        err_console.print(f"[red]analyzer '{error.analyzer}' failed:[/red] {error.message}")
 
 
 @app.callback()
@@ -45,6 +91,30 @@ def scan(
     out: Annotated[
         Path, typer.Option("--out", "-o", help="Directory for report.json / report.html.")
     ] = Path("report"),
+    fail_on: Annotated[
+        str | None,
+        typer.Option(
+            "--fail-on",
+            help="Exit with status 1 if any finding is at/above this severity "
+            "(info, low, medium, high, critical). For CI use.",
+        ),
+    ] = None,
+    include_libraries: Annotated[
+        bool,
+        typer.Option(
+            "--include-libraries",
+            help="Also analyze bundled library code (slower, noisier).",
+        ),
+    ] = False,
 ) -> None:
-    """Analyze APK and write a JSON + HTML report into OUT."""
-    typer.echo(f"Scanning {apk} -> {out}/  (analysis pipeline arrives in milestone 2)")
+    """Analyze APK and print findings (reports are written to OUT)."""
+    threshold = _parse_severity(fail_on) if fail_on else None
+    try:
+        result = scan_apk(apk, include_libraries=include_libraries)
+    except ApkLoadError as exc:
+        err_console.print(f"[red]error:[/red] {exc}")
+        raise typer.Exit(EXIT_USAGE) from exc
+
+    _print_summary(result)
+    if threshold is not None and result.exceeds(threshold):
+        raise typer.Exit(1)
