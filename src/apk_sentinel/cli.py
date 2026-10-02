@@ -14,6 +14,7 @@ from apk_sentinel.analyzers import default_analyzers
 from apk_sentinel.analyzers.secrets import RuleError
 from apk_sentinel.loader import ApkLoadError
 from apk_sentinel.models import ScanResult, Severity
+from apk_sentinel.reporting import FORMATS, write_reports
 from apk_sentinel.scanner import scan_apk
 
 app = typer.Typer(
@@ -93,6 +94,15 @@ def scan(
     out: Annotated[
         Path, typer.Option("--out", "-o", help="Directory for report.json / report.html.")
     ] = Path("report"),
+    formats: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--format",
+            "-f",
+            help=f"Report format(s); repeat for several. Choices: {', '.join(FORMATS)}. "
+            "Default: all.",
+        ),
+    ] = None,
     fail_on: Annotated[
         str | None,
         typer.Option(
@@ -118,8 +128,12 @@ def scan(
         ),
     ] = None,
 ) -> None:
-    """Analyze APK and print findings (reports are written to OUT)."""
+    """Analyze APK, print findings, and write report files into OUT."""
     threshold = _parse_severity(fail_on) if fail_on else None
+    chosen = tuple(formats) if formats else FORMATS
+    unknown = sorted(set(chosen) - set(FORMATS))
+    if unknown:
+        raise typer.BadParameter(f"unknown format(s) {unknown}; choose from {list(FORMATS)}")
     try:
         analyzers = default_analyzers(secrets_rules)
         result = scan_apk(apk, analyzers, include_libraries=include_libraries)
@@ -128,5 +142,12 @@ def scan(
         raise typer.Exit(EXIT_USAGE) from exc
 
     _print_summary(result)
+    try:
+        written = write_reports(result, out, chosen)
+    except OSError as exc:
+        err_console.print(f"[red]error:[/red] cannot write reports to {out}: {exc}")
+        raise typer.Exit(EXIT_USAGE) from exc
+    for path in written:
+        console.print(f"wrote [bold]{path}[/bold]")
     if threshold is not None and result.exceeds(threshold):
         raise typer.Exit(1)
