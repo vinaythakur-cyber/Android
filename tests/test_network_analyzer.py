@@ -152,4 +152,4 @@ def test_no_pinning_is_info_with_low_confidence() -> None:
 
 def test_malformed_nsc_does_not_crash() -> None:
     findings = scan(nsc={"res/xml/n.xml": "<network-security-config"})
-    assert "NETWORK-009" in rule_ids(findings)
+    assert "NETWORK-008" in rule_ids(findings)

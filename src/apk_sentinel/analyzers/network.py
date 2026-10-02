@@ -172,7 +172,7 @@ class NetworkAnalyzer(Analyzer):
             except ET.ParseError as exc:
                 findings.append(
                     Finding(
-                        rule_id="NETWORK-009",
+                        rule_id="NETWORK-008",
                         title="Could not parse network security config",
                         severity=Severity.INFO,
                         analyzer=self.name,
