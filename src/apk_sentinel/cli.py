@@ -12,6 +12,7 @@ from rich.table import Table
 from apk_sentinel import __version__
 from apk_sentinel.analyzers import default_analyzers
 from apk_sentinel.analyzers.secrets import RuleError
+from apk_sentinel.device import Adb, AdbError
 from apk_sentinel.loader import ApkLoadError
 from apk_sentinel.models import ScanResult, Severity
 from apk_sentinel.reporting import FORMATS, write_reports
@@ -151,3 +152,80 @@ def scan(
         console.print(f"wrote [bold]{path}[/bold]")
     if threshold is not None and result.exceeds(threshold):
         raise typer.Exit(1)
+
+
+# -- Android device helpers (adb) --------------------------------------------------------
+
+SerialOption = Annotated[
+    str | None,
+    typer.Option("--serial", "-s", help="Device serial when several are connected."),
+]
+
+
+def _adb_or_exit(serial: str | None) -> Adb:
+    return Adb(serial=serial)
+
+
+@app.command()
+def devices() -> None:
+    """List Android devices visible to adb."""
+    try:
+        found = _adb_or_exit(None).devices()
+    except AdbError as exc:
+        err_console.print(f"[red]error:[/red] {exc}")
+        raise typer.Exit(EXIT_USAGE) from exc
+    if not found:
+        err_console.print(
+            "No devices. Enable USB debugging, connect the phone and accept the RSA prompt."
+        )
+        raise typer.Exit(1)
+    for device in found:
+        note = "" if device.state == "device" else "  (not ready: accept the prompt on the phone)"
+        console.print(f"{device.serial}\t{device.state}{note}")
+
+
+@app.command()
+def packages(
+    name_filter: Annotated[
+        str, typer.Option("--filter", "-f", help="Only packages whose name contains this text.")
+    ] = "",
+    include_system: Annotated[
+        bool, typer.Option("--all", help="Include system apps (default: user-installed only).")
+    ] = False,
+    serial: SerialOption = None,
+) -> None:
+    """List installed packages on the connected device."""
+    try:
+        names = _adb_or_exit(serial).list_packages(
+            include_system=include_system, name_filter=name_filter
+        )
+    except AdbError as exc:
+        err_console.print(f"[red]error:[/red] {exc}")
+        raise typer.Exit(EXIT_USAGE) from exc
+    for name in names:
+        console.print(name)
+    err_console.print(f"{len(names)} package(s)")
+
+
+@app.command()
+def pull(
+    package: Annotated[str, typer.Argument(help="Package name, e.g. com.example.app.")],
+    out: Annotated[
+        Path, typer.Option("--out", "-o", help="Directory to save the APK(s) into.")
+    ] = Path("samples"),
+    serial: SerialOption = None,
+) -> None:
+    """Copy an installed app's APK from the device so it can be scanned.
+
+    Only pull apps you own or have permission to test.
+    """
+    try:
+        files = _adb_or_exit(serial).pull(package, out)
+    except AdbError as exc:
+        err_console.print(f"[red]error:[/red] {exc}")
+        raise typer.Exit(EXIT_USAGE) from exc
+    for path in files:
+        console.print(f"saved [bold]{path}[/bold]")
+    if len(files) > 1:
+        console.print(f"[dim]split APKs detected; scan the base APK: {files[0]}[/dim]")
+    console.print(f"next: apk-sentinel scan {files[0]} --out report/")
